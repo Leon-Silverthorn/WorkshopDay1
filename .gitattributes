@@ -1,0 +1,5 @@
+* text=auto
+cli.js text eol=lf
+snip text eol=lf
+snip.cmd text eol=crlf
+snip.ps1 text eol=crlf
