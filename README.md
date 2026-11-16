@@ -94,3 +94,53 @@ git push origin main
 Only one person or agent may change branch/index state in the shared checkout at
 a time. Backend, frontend, CLI, then superproject is the initial implementation
 order. Do not reset, clean, or overwrite another contributor's uncommitted work.
+
+## Generate a release
+
+From a clean `main` checkout:
+
+```sh
+node scripts/build-bundle.mjs
+node scripts/smoke.mjs --bundle
+node scripts/build-bundle.mjs
+node scripts/build-bundle.mjs --push
+```
+
+The builder selects source branch tips once, records their exact SHAs in
+`bundle/source-revisions.json`, installs the locked frontend dependencies with
+`npm ci`, and builds Angular. It copies backend and CLI bytes unchanged. Repeated
+runs with unchanged inputs create no commits. Default execution creates local
+bundle and pointer commits; `--push` publishes bundle first, then main, using an
+explicit refspec that supports detached submodule HEADs. A dirty checkout or a
+second concurrent builder is rejected. No force pushes are used.
+
+Use Node 22 for Angular. A Node 24 orchestrator can set `SNIP_FRONTEND_NODE` to an
+absolute Node 22 executable. `BUN_BIN` may point smoke tests at a Bun executable
+when `bun` is not on PATH. Smoke checks stop their own server and clear test data.
+
+```sh
+node scripts/smoke.mjs --ui
+cd bundle
+docker build -t snip .
+docker run --rm -p 3000:3000 snip
+```
+
+In another terminal, run `node scripts/smoke.mjs --bundle --base-url
+http://localhost:3000` from main. This creates two in-memory test links. Use an
+otherwise disposable server for tests.
+
+## Security and deployment status
+
+The workshop explicitly uses Angular 19. Its committed production dependencies
+currently have high-severity advisories with no compatible Angular 19 fix offered
+by npm audit. A major framework upgrade requires a scope decision; do not run
+`npm audit fix --force` or suppress advisories to make a release pass. Generated
+output may be inspected/tested, but image publication must wait for the dependency
+and container gates to pass. See CI output for current counts; advisories change.
+
+Railway configuration is generated, including an `/api/links` health check. Set
+PORT to match the domain target port and set BASE_URL or RAILWAY_PUBLIC_DOMAIN.
+The tutorial's Railway source is the bundle branch; publishing to that branch
+would auto-deploy if a service were connected. This repository setup does not
+create a Railway service. Deploy only a verified release; pin its image digest
+when deploying from GHCR, and retain the previous verified digest for rollback.
