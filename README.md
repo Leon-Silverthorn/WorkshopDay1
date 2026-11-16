@@ -108,7 +108,8 @@ node scripts/build-bundle.mjs --push
 
 The builder selects source branch tips once, records their exact SHAs in
 `bundle/source-revisions.json`, installs the locked frontend dependencies with
-`npm ci`, and builds Angular. It copies backend and CLI bytes unchanged. Repeated
+`npm ci`, and builds Angular. It copies backend and CLI bytes unchanged, preserving
+the CLI executable flag in Git even on Windows. Repeated
 runs with unchanged inputs create no commits. Default execution creates local
 bundle and pointer commits; `--push` publishes bundle first, then main, using an
 explicit refspec that supports detached submodule HEADs. A dirty checkout or a

@@ -21,6 +21,7 @@ for (const name of ['backend', 'frontend', 'cli', 'bundle']) {
 }
 for (const [component, file] of [['backend', 'server.js'], ['cli', 'cli.js']]) {
   assert.deepEqual(git(['show', `HEAD:${file}`], join(root, component), null), git(['show', `HEAD:${file}`], join(root, 'bundle'), null), `Bundled ${file} must equal the source Git blob`);
+  assert.equal(git(['ls-tree', 'HEAD', '--', file], join(root, 'bundle')).trim(), git(['ls-tree', 'HEAD', '--', file], join(root, component)).trim(), `Bundled ${file} must preserve the source executable flag`);
 }
 const pkg = JSON.parse(readFileSync(join(root, 'bundle/package.json'), 'utf8'));
 assert.ok(!Object.hasOwn(pkg, 'type'), 'Bundled CLI must retain CommonJS defaults');

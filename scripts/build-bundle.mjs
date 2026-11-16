@@ -28,8 +28,10 @@ function ensureClean(cwd) {
   if (state) throw new Error(`Refusing to overwrite uncommitted work in ${cwd}:\n${state}`);
 }
 
-function commitIfChanged(cwd, message, paths) {
+function commitIfChanged(cwd, message, paths, executablePaths = []) {
   git(['add', '--all', '--', ...paths], cwd);
+  // Windows ignores Unix mode bits on disk. Keep the generated Git tree portable.
+  for (const file of executablePaths) git(['update-index', '--chmod=+x', '--', file], cwd);
   const diff = spawnSync('git', ['diff', '--cached', '--quiet'], { cwd, windowsHide: true });
   if (diff.error) throw diff.error;
   if (diff.status === 0) { console.log(`unchanged: ${cwd}`); return false; }
@@ -91,7 +93,7 @@ try {
     'README.md': '# Generated Snip release\n\nDo not hand-edit this branch. Run `node scripts/build-bundle.mjs` on main.\n\n`bun start` serves UI, API and redirects from one process. `node cli.js ls` uses the same API.\n`PUBLIC_DIR=./public` is a public build setting, not a secret. Configure PORT and BASE_URL or RAILWAY_PUBLIC_DOMAIN at runtime.\nStorage is in memory and restarts clear it. See source-revisions.json for exact inputs.\n\nImage publication is separately gated by tests and security scans on main. A generated branch push alone is not security approval or deployment approval.\n',
   };
   for (const [name, contents] of Object.entries(files)) await writeFile(join(bundle, name), contents, 'utf8');
-  commitIfChanged(bundle, 'Generate Snip bundle', ['.']);
+  commitIfChanged(bundle, 'Generate Snip bundle', ['.'], ['cli.js']);
   commitIfChanged(root, 'Pin generated Snip bundle and source revisions', ['backend', 'frontend', 'cli', 'bundle']);
   if (push) {
     // Explicit refspec works when submodule HEAD is detached. No force pushes.
