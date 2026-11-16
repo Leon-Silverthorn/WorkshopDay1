@@ -42,7 +42,11 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
       - name: Assemble local release from selected source tips
-        run: node scripts/build-bundle.mjs
+        id: release
+        run: |
+          node scripts/build-bundle.mjs
+          echo "main_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "bundle_sha=$(git -C bundle rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Verify pinned inputs and integration
         run: |
           node scripts/verify-pins.mjs
@@ -56,11 +60,21 @@ jobs:
       - name: Dependency security gate
         run: npm --prefix frontend audit --omit=dev --audit-level=high
       - name: Push only verified bundle and main pins
-        run: node scripts/build-bundle.mjs --push
+        env:
+          RELEASE_SHA: ${{ steps.release.outputs.main_sha }}
+          BUNDLE_SHA: ${{ steps.release.outputs.bundle_sha }}
+        # Do not rebuild here: --push would select source tips again after testing.
+        run: |
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test "$(git -C bundle rev-parse HEAD)" = "$BUNDLE_SHA"
+          test -z "$(git status --porcelain)"
+          node scripts/verify-pins.mjs
+          git -C bundle push origin "$BUNDLE_SHA:refs/heads/bundle"
+          git push origin "$RELEASE_SHA:refs/heads/main"
       - name: Explicitly dispatch Docker verification for the resulting commit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_SHA: ${{ steps.release.outputs.main_sha }}
         run: |
-          release_sha=$(git rev-parse HEAD)
           gh api --method POST "repos/$GITHUB_REPOSITORY/actions/workflows/docker.yml/dispatches" \
-            -f ref=main -f "inputs[release_sha]=$release_sha"
+            -f ref=main -f "inputs[release_sha]=$RELEASE_SHA"

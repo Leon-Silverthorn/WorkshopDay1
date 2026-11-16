@@ -149,7 +149,8 @@ when deploying from GHCR, and retain the previous verified digest for rollback.
 
 - **Build bundle** runs hourly (17 minutes past the hour, UTC) or manually. It uses
   Node 24 for orchestration and Node 22 for Angular, builds/tests a local release,
-  and only pushes after the production dependency gate passes. It explicitly
+  and only pushes those exact commits after the production dependency gate passes,
+  without fetching or rebuilding newer inputs after testing. It explicitly
   dispatches Docker CI because pushes made with GITHUB_TOKEN do not trigger a
   second push workflow.
 - **Build and push image** runs on main pushes changing the exact `bundle` gitlink
