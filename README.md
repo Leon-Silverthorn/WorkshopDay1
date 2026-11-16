@@ -144,3 +144,29 @@ The tutorial's Railway source is the bundle branch; publishing to that branch
 would auto-deploy if a service were connected. This repository setup does not
 create a Railway service. Deploy only a verified release; pin its image digest
 when deploying from GHCR, and retain the previous verified digest for rollback.
+
+## CI and container publication
+
+- **Build bundle** runs hourly (17 minutes past the hour, UTC) or manually. It uses
+  Node 24 for orchestration and Node 22 for Angular, builds/tests a local release,
+  and only pushes after the production dependency gate passes. It explicitly
+  dispatches Docker CI because pushes made with GITHUB_TOKEN do not trigger a
+  second push workflow.
+- **Build and push image** runs on main pushes changing the exact `bundle` gitlink
+  or its workflow file, and on manual dispatch. An optional `release_sha` pins an
+  exact main commit; it must belong to main's history. Source pins are verified
+  without advancing branch tips. It runs component/API/bundle tests, builds and
+  smoke-tests the container, and scans production dependencies and the image.
+- HIGH/CRITICAL findings fail publication. Login and pushing happen only after all
+  checks pass. The same tested local image is pushed (no intervening rebuild), then
+  pulled by digest and smoke-tested again. Expected tags after a passing release:
+  `ghcr.io/leon-silverthorn/workshopday1:latest` and `:sha-<12-character-main-sha>`.
+  A tag name in this README is not a claim that an image has been published.
+- Job permissions are explicit: bundle has contents write and actions write;
+  Docker has contents read and packages write. Actions use commit SHAs, the Bun
+  base uses a digest, CI builds are serialized, and no personal token is stored in
+  repository files. GHCR packages may initially be private; review visibility if
+  unauthenticated pulls are required.
+
+Workflows: [Actions](https://github.com/Leon-Silverthorn/WorkshopDay1/actions).
+The root agent rules are mirrored byte-for-byte to Copilot instructions.

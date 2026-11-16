@@ -1,0 +1,66 @@
+name: Build bundle
+
+on:
+  # Source-branch pushes cannot load a workflow that exists only on main.
+  # This project build schedule is intentionally hourly, with manual invocation.
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+concurrency:
+  group: bundle-release
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: write # Explicitly dispatch Docker; GITHUB_TOKEN pushes do not chain push workflows.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          submodules: true
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Save supported Angular runtime
+        run: echo "SNIP_FRONTEND_NODE=$(command -v node)" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.4'
+      - name: Set commit identity
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
+      - name: Assemble local release from selected source tips
+        run: node scripts/build-bundle.mjs
+      - name: Verify pinned inputs and integration
+        run: |
+          node scripts/verify-pins.mjs
+          node scripts/smoke.mjs --bundle
+          npm --prefix cli test
+      - name: Frontend tests on supported Node
+        working-directory: frontend
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+        run: '"$SNIP_FRONTEND_NODE" node_modules/@angular/cli/bin/ng.js test --watch=false --browsers=ChromeHeadless'
+      - name: Dependency security gate
+        run: npm --prefix frontend audit --omit=dev --audit-level=high
+      - name: Push only verified bundle and main pins
+        run: node scripts/build-bundle.mjs --push
+      - name: Explicitly dispatch Docker verification for the resulting commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          release_sha=$(git rev-parse HEAD)
+          gh api --method POST "repos/$GITHUB_REPOSITORY/actions/workflows/docker.yml/dispatches" \
+            -f ref=main -f "inputs[release_sha]=$release_sha"

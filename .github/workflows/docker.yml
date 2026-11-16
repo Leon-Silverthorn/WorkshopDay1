@@ -1,0 +1,148 @@
+name: Build and push image
+
+on:
+  push:
+    branches: [main]
+    # bundle is one gitlink entry, not bundle/** file paths.
+    paths: [bundle, .github/workflows/docker.yml]
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Exact main commit dispatched by bundle CI (blank means current main)
+        required: false
+        type: string
+
+permissions: {}
+concurrency:
+  group: docker-release
+  cancel-in-progress: false
+
+jobs:
+  image:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Validate optional release commit
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          if [[ -n "$RELEASE_SHA" && ! "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+            echo 'release_sha must be a full commit SHA' >&2
+            exit 1
+          fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.release_sha || github.sha }}
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify release ancestry and exact submodule pins
+        run: |
+          git merge-base --is-ancestor HEAD origin/main
+          node scripts/verify-pins.mjs
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.4'
+      - name: Install locked source dependencies
+        id: dependencies
+        run: npm --prefix frontend ci --no-audit --no-fund
+      - name: Component and bundled application checks
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+        run: |
+          npm --prefix cli test
+          npm --prefix frontend test -- --watch=false --browsers=ChromeHeadless
+          node scripts/smoke.mjs
+          node scripts/smoke.mjs --bundle
+          node scripts/verify-pins.mjs
+      - name: Image coordinates
+        id: coordinates
+        run: |
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "short=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+          echo "bundle=$(git -C bundle rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        id: metadata
+        with:
+          images: ${{ steps.coordinates.outputs.image }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=sha-${{ steps.coordinates.outputs.short }}
+          labels: |
+            org.opencontainers.image.revision=${{ steps.coordinates.outputs.bundle }}
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build pinned bundle locally for verification
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ./bundle
+          file: ./bundle/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          provenance: false
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+      - name: Container runtime smoke test
+        env:
+          IMAGE: ${{ steps.coordinates.outputs.image }}
+          SHORT_SHA: ${{ steps.coordinates.outputs.short }}
+        run: |
+          docker run --detach --name snip-verification --publish 127.0.0.1:3000:3000 \
+            --env BASE_URL=http://127.0.0.1:3000 "$IMAGE:sha-$SHORT_SHA"
+          node scripts/smoke.mjs --bundle --base-url http://127.0.0.1:3000
+      - name: Container vulnerability gate
+        if: success()
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          version: 'v0.76.2'
+          scan-type: image
+          image-ref: ${{ steps.coordinates.outputs.image }}:sha-${{ steps.coordinates.outputs.short }}
+          format: table
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          scanners: vuln
+      - name: Production dependency gate
+        if: always() && steps.dependencies.outcome == 'success'
+        run: npm --prefix frontend audit --omit=dev --audit-level=high
+      - name: Log in only after all verification and security gates pass
+        if: success()
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push the already-tested image without rebuilding
+        if: success()
+        env:
+          IMAGE_TAGS: ${{ steps.metadata.outputs.tags }}
+        run: |
+          while IFS= read -r tag; do
+            docker push "$tag"
+          done <<< "$IMAGE_TAGS"
+      - name: Pull and verify the published image
+        if: success()
+        env:
+          IMAGE: ${{ steps.coordinates.outputs.image }}
+          SHORT_SHA: ${{ steps.coordinates.outputs.short }}
+        run: |
+          docker rm --force snip-verification
+          docker pull "$IMAGE:sha-$SHORT_SHA"
+          digest=$(docker image inspect "$IMAGE:sha-$SHORT_SHA" --format '{{index .RepoDigests 0}}')
+          echo "Verified release digest: $digest"
+          docker run --detach --name snip-verification --publish 127.0.0.1:3000:3000 \
+            --env BASE_URL=http://127.0.0.1:3000 "$digest"
+          node scripts/smoke.mjs --bundle --base-url http://127.0.0.1:3000
+      - name: Container logs and cleanup
+        if: always()
+        run: |
+          docker logs snip-verification 2>&1 || true
+          docker rm --force snip-verification 2>/dev/null || true
