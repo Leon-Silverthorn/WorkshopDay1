@@ -1,0 +1,67 @@
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+  <a class="brand" href="/" aria-label="Snip home"><span class="brand-mark" aria-hidden="true">↗</span>snip<span class="brand-dot">.</span></a>
+  <span class="header-note">A little less link.</span>
+</header>
+<main id="main" tabindex="-1">
+  <section class="hero" aria-labelledby="page-title">
+    <p class="eyebrow">SMALL LINKS. SIMPLE SHARING.</p>
+    <h1 id="page-title">Long URL?<br>Keep it <span>short.</span></h1>
+    <p class="intro">Paste a link. Give it a snip. Share something simpler.</p>
+    <form [formGroup]="form" (ngSubmit)="submit()" novalidate [attr.aria-busy]="submitting()">
+      <label for="url">Your original URL</label>
+      <div class="input-row" [class.has-error]="urlError">
+        <span class="input-icon" aria-hidden="true">↗</span>
+        <input id="url" type="url" formControlName="url" required placeholder="https://example.com/something-long"
+          autocomplete="url" autocapitalize="off" spellcheck="false"
+          [attr.aria-invalid]="urlError ? 'true' : null" aria-describedby="url-hint url-error">
+        <button class="primary" type="submit" [disabled]="submitting()">{{ submitting() ? 'Shortening…' : 'Shorten link' }} <span aria-hidden="true">↗</span></button>
+      </div>
+      <p id="url-hint" class="hint">HTTP and HTTPS links welcome.</p>
+      <p id="url-error" class="error" aria-live="polite">{{ urlError }}</p>
+      @if (submitError()) {
+        <p class="notice error-notice" role="alert">{{ submitError() }}</p>
+      }
+      <span class="sr-only" role="status">{{ submitting() ? 'Creating your short link.' : '' }}</span>
+    </form>
+    @if (created(); as link) {
+      <div class="notice success" role="status">
+        <span class="success-mark" aria-hidden="true">✓</span>
+        <div><strong>Ready to share</strong><a [href]="link.shortUrl" target="_blank" rel="noopener noreferrer">{{ link.shortUrl }}<span class="sr-only"> (opens in a new tab)</span></a></div>
+      </div>
+    }
+  </section>
+  <section class="links-card" aria-labelledby="links-title" [attr.aria-busy]="loading()">
+    <div class="card-header">
+      <div><h2 id="links-title">Your links <span class="count">{{ links().length }}</span></h2><p>Small links, all in one place.</p></div>
+      <button class="secondary" type="button" (click)="refresh()" [disabled]="loading() || submitting()">{{ loading() ? 'Refreshing…' : 'Refresh links' }}</button>
+    </div>
+    @if (listError()) {
+      <p class="list-notice error-notice" role="alert">{{ listError() }} @if (links().length > 0) { Previously loaded links may be out of date. }</p>
+    }
+    @if (loading()) {
+      <p class="list-notice" role="status">Loading links…</p>
+    } @else if (!listError() && links().length === 0) {
+      <div class="empty"><span aria-hidden="true">↗</span><h3>A fresh start.</h3><p>Your first short link is one paste away.</p></div>
+    }
+    @if (links().length > 0) {
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Saved links; scroll horizontally on small screens">
+        <table>
+          <caption class="sr-only">Short links, original URLs, and hit counts</caption>
+          <thead><tr><th scope="col">SHORT LINK</th><th scope="col">ORIGINAL URL</th><th scope="col" class="hits">HITS</th></tr></thead>
+          <tbody>
+            @for (link of links(); track link.code) {
+              <tr>
+                <td><a class="short-link" [href]="link.shortUrl" target="_blank" rel="noopener noreferrer" [title]="link.shortUrl">{{ link.code }} <span aria-hidden="true">↗</span><span class="sr-only"> (opens in a new tab)</span></a></td>
+                <td class="original">{{ link.url }}</td>
+                <td class="hits">{{ link.hits }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+    <div class="card-footer">Hit counts update when you refresh or return to this window.</div>
+  </section>
+  <footer>Made for sharing. <span>Links reset when the server restarts.</span></footer>
+</main>
